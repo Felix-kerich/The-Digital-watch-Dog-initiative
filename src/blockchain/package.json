@@ -1,0 +1,28 @@
+{
+  "name": "digital-watchdog-blockchain",
+  "version": "1.0.0",
+  "description": "Blockchain component for the Digital Watchdog Initiative",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:ganache": "hardhat run scripts/deploy.js --network ganache",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "wallet": "cd wallet && ./start-wallet.sh",
+    "extract-artifacts": "node scripts/extract-artifacts.js"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "4.9.3",
+    "dotenv": "16.1.4"
+  },
+  "devDependencies": {
+    "@nomiclabs/hardhat-ethers": "2.2.2",
+    "@nomiclabs/hardhat-etherscan": "3.1.7",
+    "@nomiclabs/hardhat-waffle": "2.0.5",
+    "chai": "4.3.7",
+    "ethereum-waffle": "^3.4.4",
+    "ethers": "5.7.2",
+    "hardhat": "2.16.1"
+  }
+}

@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # MySQL database
+  mysql:
+    image: mysql:8.0
+    container_name: api-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-password}
+      MYSQL_DATABASE: ${DB_NAME:-fedhathbt}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./src/api/mysql/init:/docker-entrypoint-initdb.d
+    ports:
+      - "${DB_PORT:-3307}:3306"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # API service
+  api:
+    build: 
+      context: .
+      dockerfile: src/api/Dockerfile
+    container_name: api-service
+    environment:
+      PORT: ${PORT:-8080}
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_NAME: ${DB_NAME:-fedhathbt}
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-replace-this-in-production}
+      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-24h}
+      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-168h}
+      AI_SERVICE_URL: http://ai:5000
+      BLOCKCHAIN_SERVICE_URL: http://blockchain:8545
+      CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:-0x0000000000000000000000000000000000000000}
+      BLOCKCHAIN_PRIVATE_KEY: ${BLOCKCHAIN_PRIVATE_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+    volumes:
+      - ./src/api/logs:/app/logs
+      - ./src/api/uploads:/app/uploads
+    ports:
+      - "${PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai:
+        condition: service_started
+      blockchain:
+        condition: service_started
+    restart: unless-stopped
+
+  # AI service for anomaly detection
+  ai:
+    build: 
+      context: ./src/ai
+      dockerfile: Dockerfile
+    container_name: ai-service
+    ports:
+      - "5000:5000"
+    volumes:
+      - ai_models:/app/models
+    restart: unless-stopped
+
+  # Blockchain service (Ganache for development)
+  blockchain:
+    image: trufflesuite/ganache:latest
+    container_name: blockchain-service
+    ports:
+      - "8545:8545"
+    command: --deterministic --mnemonic "test test test test test test test test test test test junk" --chain.networkId 1337
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+    container_name: frontend-service
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080/api
+    restart: unless-stopped
+    depends_on:
+      - api
+
+volumes:
+  mysql_data:
+  ai_models: 

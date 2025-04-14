@@ -1,0 +1,8 @@
+{
+  "TransactionEventLogger": "0xD802490E0cDD3da18095F7BEe1Ac5881d1E64394",
+  "FundManager": "0xb8727842a6ffB9a7A35b553364Ae8d998FC28AA5",
+  "network": "ganache",
+  "chainId": 1337,
+  "deployedBy": "0x02543224B2539C04bEa1FBAB0391f5d1656F79Ad",
+  "deploymentTime": "2025-04-14T19:35:11.420Z"
+}

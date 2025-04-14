@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Watchdog Initiative - Blockchain Test Shell</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f8fafc;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 30px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            color: #2563eb;
+            margin-bottom: 20px;
+        }
+        
+        h2 {
+            color: #475569;
+            margin-top: 30px;
+        }
+        
+        pre {
+            background-color: #1e293b;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        
+        .steps {
+            margin-top: 30px;
+        }
+        
+        .step {
+            margin-bottom: 20px;
+            padding-left: 20px;
+            border-left: 3px solid #2563eb;
+        }
+        
+        .step-number {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            background-color: #2563eb;
+            color: white;
+            text-align: center;
+            line-height: 30px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        
+        .buttons {
+            margin-top: 40px;
+            display: flex;
+            gap: 15px;
+        }
+        
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #2563eb;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.2s ease;
+        }
+        
+        .button:hover {
+            background-color: #1d4ed8;
+        }
+        
+        .secondary-button {
+            background-color: #475569;
+        }
+        
+        .secondary-button:hover {
+            background-color: #334155;
+        }
+        
+        .alert {
+            padding: 15px;
+            background-color: #fef2f2;
+            color: #ef4444;
+            border-left: 4px solid #ef4444;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Digital Watchdog Initiative - Blockchain Test Shell</h1>
+        
+        <div class="alert">
+            <strong>Important:</strong> Before using the wallet interface, you need to deploy the smart contracts to your local Ganache blockchain.
+        </div>
+        
+        <h2>Setup Instructions</h2>
+        
+        <div class="steps">
+            <div class="step">
+                <span class="step-number">1</span>
+                <strong>Make sure Ganache is running</strong>
+                <p>Ensure that your Ganache blockchain is running on the default port (7545).</p>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">2</span>
+                <strong>Deploy the contracts</strong>
+                <p>Run the following command in your terminal (from the blockchain directory):</p>
+                <pre>npx hardhat run scripts/deploy.js --network ganache</pre>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">3</span>
+                <strong>Check contract addresses</strong>
+                <p>The deployment script will create a <code>deployed-contracts.json</code> file in this directory with the addresses of your deployed contracts.</p>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">4</span>
+                <strong>Connect MetaMask to Ganache</strong>
+                <p>Configure MetaMask to connect to your local Ganache blockchain:</p>
+                <ul>
+                    <li>Network Name: <strong>Ganache</strong></li>
+                    <li>RPC URL: <strong>http://localhost:7545</strong></li>
+                    <li>Chain ID: <strong>1337</strong></li>
+                    <li>Currency Symbol: <strong>ETH</strong></li>
+                </ul>
+                <p>You can also import one of the Ganache accounts using its private key.</p>
+            </div>
+        </div>
+        
+        <h2>Need Help?</h2>
+        <p>
+            If you encounter any issues, make sure that:
+        </p>
+        <ul>
+            <li>Your Hardhat configuration is correctly set up for Ganache</li>
+            <li>You have compiled the contracts (<code>npx hardhat compile</code>)</li>
+            <li>MetaMask is unlocked and connected to the Ganache network</li>
+            <li>You have sufficient test ETH in your wallet</li>
+        </ul>
+        
+        <div class="buttons">
+            <a href="index.html" class="button">Go to Wallet Interface</a>
+            <a href="https://github.com/trufflesuite/ganache#readme" target="_blank" class="button secondary-button">Ganache Documentation</a>
+        </div>
+    </div>
+    
+    <script>
+        // Check if deployed-contracts.json exists
+        fetch('./deployed-contracts.json')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Contracts not deployed');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // If contracts are deployed, redirect to main interface
+                if (data && Object.keys(data).length > 0) {
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 2000);
+                }
+            })
+            .catch(error => {
+                console.log('Contracts not yet deployed:', error);
+                // Stay on this page if contracts are not deployed
+            });
+    </script>
+</body>
+</html> 
