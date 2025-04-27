@@ -72,8 +72,8 @@ func HandleError(c *gin.Context, err error) {
 	}
 }
 
-// ValidationError handles validation errors and sends a standardized response
-func ValidationError(c *gin.Context, fieldErrors map[string]string) {
+// HandleValidationError handles validation errors and sends a standardized response
+func HandleValidationError(c *gin.Context, fieldErrors map[string]string) {
 	details := ""
 	for field, msg := range fieldErrors {
 		if details != "" {

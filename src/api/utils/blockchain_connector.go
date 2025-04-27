@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 
 	"github.com/ethereum/go-ethereum"
@@ -31,29 +30,36 @@ const (
 
 // BlockchainService represents a service to interact with the blockchain
 type BlockchainService struct {
-	client          *ethclient.Client
-	contractABI     abi.ABI
-	contractAddress common.Address
-	privateKey      *ecdsa.PrivateKey
+	client             *ethclient.Client
+	privateKey         *ecdsa.PrivateKey
+	loggerAddress      common.Address
+	fundManagerAddress common.Address
+	loggerABI          abi.ABI
+	fundManagerABI     abi.ABI
 }
 
 // NewBlockchainService creates a new blockchain service
 func NewBlockchainService() (*BlockchainService, error) {
+	config := GetConfig()
+
 	// Get blockchain service URL from environment
-	blockchainURL := os.Getenv("BLOCKCHAIN_SERVICE_URL")
+	blockchainURL := config.BlockchainServiceURL
 	if blockchainURL == "" {
 		return nil, fmt.Errorf("BLOCKCHAIN_SERVICE_URL environment variable not set")
 	}
 
-	// Get contract address from environment
-	contractAddressStr := os.Getenv("CONTRACT_ADDRESS")
-	if contractAddressStr == "" {
-		return nil, fmt.Errorf("CONTRACT_ADDRESS environment variable not set")
+	// Get contract addresses from config
+	loggerAddressStr := config.TransactionLogger
+	fundManagerAddressStr := config.FundManager
+	if loggerAddressStr == "" || fundManagerAddressStr == "" {
+		return nil, fmt.Errorf("contract addresses not set in environment variables")
 	}
-	contractAddress := common.HexToAddress(contractAddressStr)
+
+	loggerAddress := common.HexToAddress(loggerAddressStr)
+	fundManagerAddress := common.HexToAddress(fundManagerAddressStr)
 
 	// Get private key from environment
-	privateKeyStr := os.Getenv("BLOCKCHAIN_PRIVATE_KEY")
+	privateKeyStr := config.BlockchainPrivateKey
 	if privateKeyStr == "" {
 		return nil, fmt.Errorf("BLOCKCHAIN_PRIVATE_KEY environment variable not set")
 	}
@@ -75,86 +81,158 @@ func NewBlockchainService() (*BlockchainService, error) {
 		return nil, fmt.Errorf("failed to connect to blockchain: %v", err)
 	}
 
-	// Load contract ABI from environment or file
-	// For this implementation, we need to use the ABI from a proper source
-	contractABIStr := os.Getenv("CONTRACT_ABI")
-	if contractABIStr == "" {
-		// In a production environment, this would be loaded from a compiled contract JSON file
-		contractABIStr = `[
-			{
-				"inputs": [
-					{"internalType": "bytes32", "name": "id", "type": "bytes32"},
-					{"internalType": "uint256", "name": "amount", "type": "uint256"},
-					{"internalType": "string", "name": "currency", "type": "string"},
-					{"internalType": "uint8", "name": "txType", "type": "uint8"},
-					{"internalType": "string", "name": "description", "type": "string"},
-					{"internalType": "bytes32", "name": "sourceId", "type": "bytes32"},
-					{"internalType": "bytes32", "name": "destinationId", "type": "bytes32"},
-					{"internalType": "bytes32", "name": "fundId", "type": "bytes32"},
-					{"internalType": "bytes32", "name": "budgetLineItemId", "type": "bytes32"},
-					{"internalType": "string", "name": "documentRef", "type": "string"},
-					{"internalType": "bytes32", "name": "createdById", "type": "bytes32"}
-				],
-				"name": "createTransaction",
-				"outputs": [],
-				"stateMutability": "nonpayable",
-				"type": "function"
-			},
-			{
-				"inputs": [
-					{"internalType": "bytes32", "name": "id", "type": "bytes32"},
-					{"internalType": "bytes32", "name": "approvedById", "type": "bytes32"}
-				],
-				"name": "approveTransaction",
-				"outputs": [],
-				"stateMutability": "nonpayable",
-				"type": "function"
-			},
-			{
-				"inputs": [
-					{"internalType": "bytes32", "name": "id", "type": "bytes32"},
-					{"internalType": "bytes32", "name": "rejectedById", "type": "bytes32"}
-				],
-				"name": "rejectTransaction",
-				"outputs": [],
-				"stateMutability": "nonpayable",
-				"type": "function"
-			},
-			{
-				"inputs": [
-					{"internalType": "bytes32", "name": "id", "type": "bytes32"},
-					{"internalType": "bytes32", "name": "completedById", "type": "bytes32"}
-				],
-				"name": "completeTransaction",
-				"outputs": [],
-				"stateMutability": "nonpayable",
-				"type": "function"
-			},
-			{
-				"inputs": [
-					{"internalType": "bytes32", "name": "id", "type": "bytes32"},
-					{"internalType": "string", "name": "reason", "type": "string"}
-				],
-				"name": "flagTransaction",
-				"outputs": [],
-				"stateMutability": "nonpayable",
-				"type": "function"
-			}
-		]`
+	// Verify we're connected to the right network
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
-	contractABI, err := abi.JSON(strings.NewReader(contractABIStr))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse contract ABI: %v", err)
+	expectedChainID := new(big.Int)
+	expectedChainID.SetString(config.ChainID, 10)
+	if chainID.Cmp(expectedChainID) != 0 {
+		Logger.Warnf("Connected to chain ID %v, expected %v", chainID.String(), expectedChainID.String())
 	}
+
+	// Parse Logger ABI
+	loggerABI, err := abi.JSON(strings.NewReader(TransactionLoggerABI))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse logger ABI: %v", err)
+	}
+
+	// Parse FundManager ABI
+	fundManagerABI, err := abi.JSON(strings.NewReader(FundManagerABI))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse fund manager ABI: %v", err)
+	}
+
+	Logger.Infof("Connected to %s blockchain network (Chain ID: %s)", config.NetworkName, chainID.String())
 
 	return &BlockchainService{
-		client:          client,
-		contractABI:     contractABI,
-		contractAddress: contractAddress,
-		privateKey:      privateKey,
+		client:             client,
+		privateKey:         privateKey,
+		loggerAddress:      loggerAddress,
+		fundManagerAddress: fundManagerAddress,
+		loggerABI:          loggerABI,
+		fundManagerABI:     fundManagerABI,
 	}, nil
 }
+
+// Constants for contract ABIs
+const TransactionLoggerABI = `[
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "creatorHash", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "detailsHash", "type": "bytes32"}
+		],
+		"name": "recordTransactionCreation",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "approverHash", "type": "bytes32"}
+		],
+		"name": "recordApproval",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "rejectorHash", "type": "bytes32"}
+		],
+		"name": "recordRejection",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "completerHash", "type": "bytes32"}
+		],
+		"name": "recordCompletion",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "string", "name": "reason", "type": "string"}
+		],
+		"name": "recordFlagging",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	}
+]`
+
+const FundManagerABI = `[
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "uint256", "name": "amount", "type": "uint256"},
+			{"internalType": "string", "name": "currency", "type": "string"},
+			{"internalType": "uint8", "name": "txType", "type": "uint8"},
+			{"internalType": "string", "name": "description", "type": "string"},
+			{"internalType": "bytes32", "name": "sourceId", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "destinationId", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "fundId", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "budgetLineItemId", "type": "bytes32"},
+			{"internalType": "string", "name": "documentRef", "type": "string"},
+			{"internalType": "bytes32", "name": "createdById", "type": "bytes32"}
+		],
+		"name": "createTransaction",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "approvedById", "type": "bytes32"}
+		],
+		"name": "approveTransaction",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "rejectedById", "type": "bytes32"}
+		],
+		"name": "rejectTransaction",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "bytes32", "name": "completedById", "type": "bytes32"}
+		],
+		"name": "completeTransaction",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{"internalType": "bytes32", "name": "id", "type": "bytes32"},
+			{"internalType": "string", "name": "reason", "type": "string"}
+		],
+		"name": "flagTransaction",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	}
+]`
 
 // Close closes the blockchain connection
 func (bs *BlockchainService) Close() {
@@ -238,14 +316,14 @@ func (bs *BlockchainService) RecordTransaction(transaction *TransactionData) (st
 	}
 
 	// Pack the method call for recordTransactionCreation
-	input, err := bs.contractABI.Pack("recordTransactionCreation",
+	input, err := bs.loggerABI.Pack("recordTransactionCreation",
 		id, creatorHash, detailsHash)
 	if err != nil {
 		return "", fmt.Errorf("failed to pack transaction data: %v", err)
 	}
 
 	// Create and send the transaction
-	tx, err := bs.sendTransaction(auth, input)
+	tx, err := bs.sendTransaction(auth, input, bs.loggerAddress)
 	if err != nil {
 		return "", fmt.Errorf("failed to record transaction on blockchain: %v", err)
 	}
@@ -266,12 +344,12 @@ func (bs *BlockchainService) ApproveTransaction(transactionID, approverID string
 		return "", fmt.Errorf("failed to hash approver ID: %v", err)
 	}
 
-	input, err := bs.contractABI.Pack("recordApproval", id, approverHash)
+	input, err := bs.loggerABI.Pack("recordApproval", id, approverHash)
 	if err != nil {
 		return "", fmt.Errorf("failed to pack approval data: %v", err)
 	}
 
-	tx, err := bs.sendTransaction(auth, input)
+	tx, err := bs.sendTransaction(auth, input, bs.loggerAddress)
 	if err != nil {
 		return "", fmt.Errorf("failed to record approval on blockchain: %v", err)
 	}
@@ -292,12 +370,12 @@ func (bs *BlockchainService) RejectTransaction(transactionID, rejectorID string)
 		return "", fmt.Errorf("failed to hash rejector ID: %v", err)
 	}
 
-	input, err := bs.contractABI.Pack("recordRejection", id, rejectorHash)
+	input, err := bs.loggerABI.Pack("recordRejection", id, rejectorHash)
 	if err != nil {
 		return "", fmt.Errorf("failed to pack rejection data: %v", err)
 	}
 
-	tx, err := bs.sendTransaction(auth, input)
+	tx, err := bs.sendTransaction(auth, input, bs.loggerAddress)
 	if err != nil {
 		return "", fmt.Errorf("failed to record rejection on blockchain: %v", err)
 	}
@@ -318,12 +396,12 @@ func (bs *BlockchainService) CompleteTransaction(transactionID, completerID stri
 		return "", fmt.Errorf("failed to hash completer ID: %v", err)
 	}
 
-	input, err := bs.contractABI.Pack("recordCompletion", id, completerHash)
+	input, err := bs.loggerABI.Pack("recordCompletion", id, completerHash)
 	if err != nil {
 		return "", fmt.Errorf("failed to pack completion data: %v", err)
 	}
 
-	tx, err := bs.sendTransaction(auth, input)
+	tx, err := bs.sendTransaction(auth, input, bs.loggerAddress)
 	if err != nil {
 		return "", fmt.Errorf("failed to record completion on blockchain: %v", err)
 	}
@@ -340,12 +418,12 @@ func (bs *BlockchainService) FlagTransaction(transactionID, reason string) (stri
 
 	id := stringToBytes32(transactionID)
 
-	input, err := bs.contractABI.Pack("recordFlagging", id, reason)
+	input, err := bs.loggerABI.Pack("recordFlagging", id, reason)
 	if err != nil {
 		return "", fmt.Errorf("failed to pack flagging data: %v", err)
 	}
 
-	tx, err := bs.sendTransaction(auth, input)
+	tx, err := bs.sendTransaction(auth, input, bs.loggerAddress)
 	if err != nil {
 		return "", fmt.Errorf("failed to record flagging on blockchain: %v", err)
 	}
@@ -357,13 +435,13 @@ func (bs *BlockchainService) FlagTransaction(transactionID, reason string) (stri
 func (bs *BlockchainService) GetTransactionEvents(transactionID string) ([]EventRecord, error) {
 	id := stringToBytes32(transactionID)
 
-	result, err := bs.contractABI.Pack("getTransactionEvents", id)
+	result, err := bs.loggerABI.Pack("getTransactionEvents", id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack get events data: %v", err)
 	}
 
 	msg := ethereum.CallMsg{
-		To:   &bs.contractAddress,
+		To:   &bs.loggerAddress,
 		Data: result,
 	}
 
@@ -373,7 +451,7 @@ func (bs *BlockchainService) GetTransactionEvents(transactionID string) ([]Event
 	}
 
 	// Unpack the results
-	results, err := bs.contractABI.Unpack("getTransactionEvents", output)
+	results, err := bs.loggerABI.Unpack("getTransactionEvents", output)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack events: %v", err)
 	}
@@ -465,7 +543,7 @@ func (bs *BlockchainService) createTransaction(
 	createdById [32]byte,
 ) (*types.Transaction, error) {
 	// Pack the method call
-	input, err := bs.contractABI.Pack("createTransaction",
+	input, err := bs.fundManagerABI.Pack("createTransaction",
 		id, amount, currency, txType, description, sourceId,
 		destinationId, fundId, budgetLineItemId, documentRef, createdById)
 	if err != nil {
@@ -474,7 +552,7 @@ func (bs *BlockchainService) createTransaction(
 
 	// Create transaction data
 	txData := &types.LegacyTx{
-		To:       &bs.contractAddress,
+		To:       &bs.fundManagerAddress,
 		Gas:      auth.GasLimit,
 		GasPrice: auth.GasPrice,
 		Value:    auth.Value,
@@ -504,14 +582,14 @@ func (bs *BlockchainService) approveTransactionOnChain(
 	approvedById [32]byte,
 ) (*types.Transaction, error) {
 	// Pack the method call
-	input, err := bs.contractABI.Pack("approveTransaction", id, approvedById)
+	input, err := bs.fundManagerABI.Pack("approveTransaction", id, approvedById)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack transaction data: %v", err)
 	}
 
 	// Create transaction data
 	txData := &types.LegacyTx{
-		To:       &bs.contractAddress,
+		To:       &bs.fundManagerAddress,
 		Gas:      auth.GasLimit,
 		GasPrice: auth.GasPrice,
 		Value:    auth.Value,
@@ -541,14 +619,14 @@ func (bs *BlockchainService) rejectTransactionOnChain(
 	rejectedById [32]byte,
 ) (*types.Transaction, error) {
 	// Pack the method call
-	input, err := bs.contractABI.Pack("rejectTransaction", id, rejectedById)
+	input, err := bs.fundManagerABI.Pack("rejectTransaction", id, rejectedById)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack transaction data: %v", err)
 	}
 
 	// Create transaction data
 	txData := &types.LegacyTx{
-		To:       &bs.contractAddress,
+		To:       &bs.fundManagerAddress,
 		Gas:      auth.GasLimit,
 		GasPrice: auth.GasPrice,
 		Value:    auth.Value,
@@ -578,14 +656,14 @@ func (bs *BlockchainService) completeTransactionOnChain(
 	completedById [32]byte,
 ) (*types.Transaction, error) {
 	// Pack the method call
-	input, err := bs.contractABI.Pack("completeTransaction", id, completedById)
+	input, err := bs.fundManagerABI.Pack("completeTransaction", id, completedById)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack transaction data: %v", err)
 	}
 
 	// Create transaction data
 	txData := &types.LegacyTx{
-		To:       &bs.contractAddress,
+		To:       &bs.fundManagerAddress,
 		Gas:      auth.GasLimit,
 		GasPrice: auth.GasPrice,
 		Value:    auth.Value,
@@ -615,14 +693,14 @@ func (bs *BlockchainService) flagTransactionOnChain(
 	reason string,
 ) (*types.Transaction, error) {
 	// Pack the method call
-	input, err := bs.contractABI.Pack("flagTransaction", id, reason)
+	input, err := bs.fundManagerABI.Pack("flagTransaction", id, reason)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack transaction data: %v", err)
 	}
 
 	// Create transaction data
 	txData := &types.LegacyTx{
-		To:       &bs.contractAddress,
+		To:       &bs.fundManagerAddress,
 		Gas:      auth.GasLimit,
 		GasPrice: auth.GasPrice,
 		Value:    auth.Value,
@@ -665,10 +743,10 @@ func stringToBytes32(s string) [32]byte {
 }
 
 // sendTransaction sends a transaction to the blockchain
-func (bs *BlockchainService) sendTransaction(auth *bind.TransactOpts, input []byte) (*types.Transaction, error) {
+func (bs *BlockchainService) sendTransaction(auth *bind.TransactOpts, input []byte, contractAddress common.Address) (*types.Transaction, error) {
 	// Create transaction data
 	txData := &types.LegacyTx{
-		To:       &bs.contractAddress,
+		To:       &contractAddress,
 		Gas:      auth.GasLimit,
 		GasPrice: auth.GasPrice,
 		Value:    auth.Value,

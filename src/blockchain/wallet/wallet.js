@@ -1,18 +1,26 @@
 // wallet.js - Handles Web3 integration and smart contract interactions
 
+// Check for ethers availability
+if (typeof window.ethers === 'undefined') {
+  console.error('Ethers library is not available in wallet.js');
+  throw new Error('Ethers library is not defined');
+}
+
 // Global variables
 let currentAccount = null;
 let eventLoggerContract = null;
 let fundManagerContract = null;
 let web3Provider = null;
 let deployedContracts = {};
+let provider = null;
+let signer = null;
 
 // Contract ABIs will be loaded from JSON files
 let eventLoggerABI;
 let fundManagerABI;
 
 // Wallet and Blockchain Interaction Logic
-let provider, signer, connectedAccount;
+let connectedAccount;
 let contracts = {};
 let contractABIs = {};
 let isConnected = false;
@@ -29,9 +37,17 @@ async function initContractInteraction() {
         // Load contract ABIs
         await loadContractABIs();
         
-        if (window.ethereum && currentAccount) {
-            // Initialize contract instances if wallet is connected
-            await initializeContractInstances();
+        // Initialize provider if ethereum is available
+        if (window.ethereum) {
+            provider = new ethers.providers.Web3Provider(window.ethereum);
+            
+            // Check if already connected
+            const accounts = await provider.listAccounts();
+            if (accounts.length > 0) {
+                signer = provider.getSigner();
+                currentAccount = accounts[0];
+                await initializeContractInstances();
+            }
         }
     } catch (error) {
         console.error('Error initializing contracts:', error);
@@ -82,28 +98,50 @@ async function initializeContractInstances() {
     }
     
     try {
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const signer = provider.getSigner();
+        // Load deployed contract addresses
+        const response = await fetch('./deployed-contracts.json');
+        if (!response.ok) {
+            throw new Error('Failed to load deployed contracts');
+        }
+        
+        const deployedContracts = await response.json();
+        
+        // Initialize provider if not already done
+        if (!provider) {
+            provider = new ethers.providers.Web3Provider(window.ethereum);
+        }
+        
+        signer = provider.getSigner();
         
         // Initialize TransactionEventLogger contract
-        if (deployedContracts.transactionEventLogger && eventLoggerABI) {
+        if (deployedContracts.TransactionEventLogger && contractABIs['TransactionEventLogger']) {
             eventLoggerContract = new ethers.Contract(
-                deployedContracts.transactionEventLogger,
-                eventLoggerABI,
+                deployedContracts.TransactionEventLogger,
+                contractABIs['TransactionEventLogger'],
                 signer
             );
         }
         
         // Initialize FundManager contract
-        if (deployedContracts.fundManager && fundManagerABI) {
+        if (deployedContracts.FundManager && contractABIs['FundManager']) {
             fundManagerContract = new ethers.Contract(
-                deployedContracts.fundManager,
-                fundManagerABI,
+                deployedContracts.FundManager,
+                contractABIs['FundManager'],
                 signer
             );
         }
+        
+        // Set up chain change listener
+        window.ethereum.on('chainChanged', () => {
+            window.location.reload();
+        });
+        
+        // Set up account change listener
+        window.ethereum.on('accountsChanged', handleAccountChange);
+        
     } catch (error) {
         console.error('Error initializing contract instances:', error);
+        throw error;
     }
 }
 
@@ -123,25 +161,43 @@ async function checkWalletConnection() {
 async function connectWallet() {
     if (!window.ethereum) {
         alert('Please install MetaMask to use this dApp!');
-        return;
+        return false;
     }
     
     try {
         showLoading();
+        
+        // Initialize provider
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        
+        // Request account access
         const accounts = await window.ethereum.request({ 
             method: 'eth_requestAccounts' 
         });
         
         if (accounts.length > 0) {
             currentAccount = accounts[0];
+            signer = provider.getSigner();
+            
+            // Initialize contract instances
             await initializeContractInstances();
-            updateUIForConnectedWallet();
+            
+            // Update UI
+            await updateUIForConnectedWallet();
+            
+            // Load initial transactions
+            await loadTransactions();
+            
+            hideLoading();
+            return true;
         }
+
         hideLoading();
+        return false;
     } catch (error) {
-        hideLoading();
         console.error('Error connecting wallet:', error);
-        alert('Failed to connect wallet');
+        hideLoading();
+        throw error;
     }
 }
 
@@ -313,55 +369,6 @@ async function loadContractABIs() {
     } catch (error) {
         console.error('Error loading contract ABIs:', error);
         addEventToLog('error', 'Failed to Load ABIs', error.message);
-    }
-}
-
-// Connect wallet
-async function connectWallet() {
-    try {
-        showLoading('Connecting wallet...');
-        
-        // Request account access
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        connectedAccount = accounts[0];
-        
-        // Get signer
-        signer = provider.getSigner();
-        
-        // Initialize contract instances
-        if (contractAddresses.TransactionEventLogger) {
-            contracts.TransactionEventLogger = new ethers.Contract(
-                contractAddresses.TransactionEventLogger,
-                contractABIs['TransactionEventLogger'],
-                signer
-            );
-        }
-        
-        if (contractAddresses.FundManager) {
-            contracts.FundManager = new ethers.Contract(
-                contractAddresses.FundManager,
-                contractABIs['FundManager'],
-                signer
-            );
-        }
-        
-        isConnected = true;
-        updateUIOnConnect();
-        populateContractSelector();
-        
-        // Update account info
-        const balance = await provider.getBalance(connectedAccount);
-        const formattedBalance = ethers.utils.formatEther(balance);
-        
-        document.getElementById('account-address').textContent = connectedAccount;
-        document.getElementById('account-balance').textContent = `${formattedBalance} ETH`;
-        
-        addEventToLog('success', 'Wallet Connected', `Connected to account: ${connectedAccount}`);
-        hideLoading();
-    } catch (error) {
-        console.error('Connection error:', error);
-        addEventToLog('error', 'Connection Failed', error.message);
-        hideLoading();
     }
 }
 
@@ -548,5 +555,39 @@ function listenForEvents(contractName) {
     addEventToLog('info', 'Event Listener', `Listening for events from ${contractName}`);
 }
 
+// Load transactions
+async function loadTransactions() {
+    if (!fundManagerContract) return;
+    
+    try {
+        // Get total number of transactions
+        const transactionCount = await fundManagerContract.getTransactionCount();
+        const transactions = [];
+        
+        // Fetch each transaction's details
+        for (let i = 0; i < transactionCount; i++) {
+            const details = await fundManagerContract.getTransactionDetails(i);
+            transactions.push({
+                id: i,
+                fundId: details.fundId.toString(),
+                type: details.transactionType,
+                amount: ethers.utils.formatEther(details.amount),
+                status: details.status,
+                description: details.description,
+                recipient: details.recipientId,
+                metadata: details.metadataHash
+            });
+        }
+        
+        // Sort transactions by ID in descending order (newest first)
+        transactions.sort((a, b) => b.id - a.id);
+        
+        // Update UI with transactions
+        updateTransactionsUI(transactions);
+    } catch (error) {
+        console.error('Error loading transactions:', error);
+    }
+}
+
 // Initialize app when DOM is ready
-document.addEventListener('DOMContentLoaded', initApp); 
+document.addEventListener('DOMContentLoaded', initApp);

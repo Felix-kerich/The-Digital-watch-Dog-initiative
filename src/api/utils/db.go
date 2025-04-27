@@ -70,6 +70,7 @@ func migrateDB() error {
 		&models.Transaction{},
 		&models.BudgetLineItem{},
 		&models.AuditLog{},
+		&models.SmartContractRecord{},
 	)
 
 	if err != nil {

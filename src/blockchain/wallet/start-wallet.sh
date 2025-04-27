@@ -22,39 +22,46 @@ if [ ! -f "index.html" ] || [ ! -f "app.js" ] || [ ! -f "styles.css" ]; then
     exit 1
 fi
 
-# Extract artifacts from compiled contracts if they exist
-cd ..
-if [ -d "artifacts" ]; then
-    echo -e "${YELLOW}Extracting contract artifacts...${NC}"
-    
-    # Run the extract-artifacts script if it exists
-    if [ -f "scripts/extract-artifacts.js" ]; then
-        node scripts/extract-artifacts.js
+# Check if ethers.js local file exists, download if needed
+if [ ! -f "ethers-5.7.2.umd.min.js" ]; then
+    echo -e "${YELLOW}Local ethers.js not found. Downloading...${NC}"
+    if command -v curl &> /dev/null; then
+        curl -s -o ethers-5.7.2.umd.min.js https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js
+    elif command -v wget &> /dev/null; then
+        wget -q -O ethers-5.7.2.umd.min.js https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js
     else
-        echo -e "${YELLOW}Artifact extraction script not found, checking for compiled contracts...${NC}"
-        
-        # Manually copy artifacts if the script doesn't exist
-        if [ -d "artifacts/contracts/TransactionEventLogger.sol" ] && [ -d "artifacts/contracts/FundManager.sol" ]; then
-            cp artifacts/contracts/TransactionEventLogger.sol/TransactionEventLogger.json wallet/
-            cp artifacts/contracts/FundManager.sol/FundManager.json wallet/
-            echo -e "${GREEN}Copied contract artifacts to wallet directory${NC}"
-        else
-            echo -e "${YELLOW}Warning: Contract artifacts not found. Please compile contracts first.${NC}"
-        fi
+        echo -e "${RED}Warning: Could not download ethers.js - neither curl nor wget is available${NC}"
     fi
     
-    # Copy deployed contracts file if it exists
-    if [ -f "deployed-contracts.json" ]; then
-        cp deployed-contracts.json wallet/
-        echo -e "${GREEN}Copied deployed contracts info to wallet directory${NC}"
-    else
-        echo -e "${YELLOW}Warning: No deployed-contracts.json found.${NC}"
-        echo -e "${YELLOW}You may need to deploy contracts first or use sample data.${NC}"
+    if [ -f "ethers-5.7.2.umd.min.js" ]; then
+        echo -e "${GREEN}ethers.js downloaded successfully${NC}"
     fi
 fi
 
-# Return to wallet directory
-cd wallet
+# Check if required files exist
+if [ ! -f "deployed-contracts.json" ]; then
+    echo -e "${YELLOW}Checking for deployed contracts in parent directory...${NC}"
+    if [ -f "../deployed-contracts.json" ]; then
+        cp ../deployed-contracts.json .
+        echo -e "${GREEN}Copied deployed-contracts.json from parent directory${NC}"
+    else
+        echo -e "${RED}Warning: deployed-contracts.json not found!${NC}"
+        echo "Make sure contracts are deployed first."
+    fi
+fi
+
+# Copy contract artifacts if they exist
+if [ ! -f "TransactionEventLogger.json" ] || [ ! -f "FundManager.json" ]; then
+    echo -e "${YELLOW}Checking for contract artifacts...${NC}"
+    if [ -d "../artifacts/contracts" ]; then
+        cp ../artifacts/contracts/TransactionEventLogger.sol/TransactionEventLogger.json .
+        cp ../artifacts/contracts/FundManager.sol/FundManager.json .
+        echo -e "${GREEN}Copied contract artifacts${NC}"
+    else
+        echo -e "${RED}Warning: Contract artifacts not found!${NC}"
+        echo "Please compile contracts first."
+    fi
+fi
 
 # Find an available port starting with 8080
 PORT=8080
@@ -66,25 +73,20 @@ done
 # Start HTTP server
 echo -e "${GREEN}Starting wallet interface on port $PORT...${NC}"
 echo -e "${YELLOW}Use Ctrl+C to stop the server${NC}"
+echo -e "Access the wallet interface at ${GREEN}http://localhost:$PORT${NC}"
 
 # Try using http-server if available
 if command -v npx &> /dev/null; then
     echo -e "${GREEN}Starting with npx http-server...${NC}"
-    echo -e "${GREEN}Open your browser to http://localhost:$PORT${NC}"
-    npx http-server -p $PORT -o
+    npx http-server -p $PORT --cors
+elif command -v python3 &> /dev/null; then
+    echo -e "${GREEN}Starting with Python 3 HTTP server...${NC}"
+    python3 -m http.server $PORT
+elif command -v python &> /dev/null; then
+    echo -e "${GREEN}Starting with Python HTTP server...${NC}"
+    python -m SimpleHTTPServer $PORT
 else
-    # Fallback to Python's built-in HTTP server
-    if command -v python3 &> /dev/null; then
-        echo -e "${GREEN}Starting with Python 3 HTTP server...${NC}"
-        echo -e "${GREEN}Open your browser to http://localhost:$PORT${NC}"
-        python3 -m http.server $PORT
-    elif command -v python &> /dev/null; then
-        echo -e "${GREEN}Starting with Python HTTP server...${NC}"
-        echo -e "${GREEN}Open your browser to http://localhost:$PORT${NC}"
-        python -m http.server $PORT
-    else
-        echo -e "${RED}Error: No HTTP server available.${NC}"
-        echo "Please install Node.js/npx or Python to run the HTTP server."
-        exit 1
-    fi
+    echo -e "${RED}Error: No HTTP server available.${NC}"
+    echo "Please install Node.js/npx or Python to run the HTTP server."
+    exit 1
 fi

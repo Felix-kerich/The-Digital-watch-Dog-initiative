@@ -63,6 +63,7 @@ type AuditLog struct {
 	Detail     string    `json:"detail"`     // Additional details about the action
 	IP         string    `json:"ip"`
 	Timestamp  time.Time `json:"timestamp"`
+	Metadata   JSON                  `json:"metadata" gorm:"type:json"`
 }
 
 // BeforeCreate will set a UUID rather than numeric ID for User

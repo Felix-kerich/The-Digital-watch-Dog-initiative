@@ -1,8 +1,8 @@
 {
-  "TransactionEventLogger": "0xD802490E0cDD3da18095F7BEe1Ac5881d1E64394",
-  "FundManager": "0xb8727842a6ffB9a7A35b553364Ae8d998FC28AA5",
-  "network": "ganache",
-  "chainId": 1337,
-  "deployedBy": "0x02543224B2539C04bEa1FBAB0391f5d1656F79Ad",
-  "deploymentTime": "2025-04-14T19:35:11.420Z"
+  "TransactionEventLogger": "0xc4D560d63814FA87565a501218ad7804c18a39d7",
+  "FundManager": "0xE068A451752D8D07435583B064225d82a1ceC342",
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployedBy": "0x44789281FF6bE292fe869Ae613C58d84b177Ed6E",
+  "deploymentTime": "2025-04-21T12:09:26.599Z"
 }

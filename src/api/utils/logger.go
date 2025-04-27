@@ -16,6 +16,72 @@ import (
 // Logger is the global logger instance
 var Logger *logrus.Logger
 
+// NamedLogger represents a logger with a specific name for a component
+type NamedLogger struct {
+	logger *logrus.Logger
+	name   string
+}
+
+// NewLogger creates a new named logger for a specific component
+func NewLogger(name string) *NamedLogger {
+	return &NamedLogger{
+		logger: Logger,
+		name:   name,
+	}
+}
+
+// Info logs an info level message with the named logger
+func (l *NamedLogger) Info(message string, fields map[string]interface{}) {
+	contextFields := logrus.Fields{
+		"component": l.name,
+	}
+	
+	for k, v := range fields {
+		contextFields[k] = v
+	}
+	
+	l.logger.WithFields(contextFields).Info(message)
+}
+
+// Error logs an error level message with the named logger
+func (l *NamedLogger) Error(message string, fields map[string]interface{}) {
+	contextFields := logrus.Fields{
+		"component": l.name,
+	}
+	
+	for k, v := range fields {
+		contextFields[k] = v
+	}
+	
+	l.logger.WithFields(contextFields).Error(message)
+}
+
+// Warn logs a warning level message with the named logger
+func (l *NamedLogger) Warn(message string, fields map[string]interface{}) {
+	contextFields := logrus.Fields{
+		"component": l.name,
+	}
+	
+	for k, v := range fields {
+		contextFields[k] = v
+	}
+	
+	l.logger.WithFields(contextFields).Warn(message)
+}
+
+// Debug logs a debug level message with the named logger
+func (l *NamedLogger) Debug(message string, fields map[string]interface{}) {
+	contextFields := logrus.Fields{
+		"component": l.name,
+	}
+	
+	for k, v := range fields {
+		contextFields[k] = v
+	}
+	
+	l.logger.WithFields(contextFields).Debug(message)
+}
+
 // InitLogger initializes the logger with proper configuration
 func InitLogger() {
 	Logger = logrus.New()
@@ -38,7 +104,7 @@ func InitLogger() {
 			s := strings.Split(f.Function, ".")
 			funcName := s[len(s)-1]
 			fileName := filepath.Base(f.File)
-			return funcName, fileName + ":" + string(f.Line)
+			return funcName, fileName + ":" + fmt.Sprintf("%d", f.Line)
 		},
 		TimestampFormat: "2006-01-02 15:04:05",
 	})

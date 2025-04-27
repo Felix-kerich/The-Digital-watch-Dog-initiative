@@ -2,27 +2,27 @@ package routes
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/the-digital-watchdog-initiative/controllers"
 	"github.com/the-digital-watchdog-initiative/middleware"
+	"github.com/the-digital-watchdog-initiative/handlers"
 	"github.com/the-digital-watchdog-initiative/models"
+	"github.com/the-digital-watchdog-initiative/services"
 )
 
 // RegisterRoutes registers all routes with their respective controllers
-func RegisterRoutes(router *gin.RouterGroup) {
+func RegisterRoutes(router *gin.RouterGroup, serviceProvider *services.ServiceProvider) {
 	// Public routes - No authentication required
 
 	// Health check
-	router.GET("/health", controllers.HealthCheck)
+	router.GET("/health", handlers.HealthCheck)
 
 	// Auth routes
-	authController := controllers.NewAuthController()
+	authController := handlers.NewAuthController(serviceProvider.AuthService, serviceProvider.AuditService)
 	auth := router.Group("/auth")
 	{
 		auth.POST("/register", authController.Register)
 		auth.POST("/login", authController.Login)
 		auth.POST("/refresh", authController.RefreshToken)
 		auth.POST("/logout", authController.Logout)
-		// These endpoints will be implemented in the future
 		// auth.POST("/forgot-password", authController.ForgotPassword)
 		// auth.POST("/reset-password", authController.ResetPassword)
 	}
@@ -31,8 +31,8 @@ func RegisterRoutes(router *gin.RouterGroup) {
 	protected := router.Group("")
 	protected.Use(middleware.RequireAuth())
 	{
-		// User routesa
-		userController := controllers.NewUserController()
+		// User routes
+		userController := handlers.NewUserController(serviceProvider.UserService)
 		users := protected.Group("/users")
 		{
 			// Based on UserController implementation
@@ -42,7 +42,7 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		}
 
 		// Transaction routes
-		transactionController := controllers.NewTransactionController()
+		transactionController := handlers.NewTransactionController(serviceProvider.TransactionService, serviceProvider.FundService, serviceProvider.EntityService, serviceProvider.AuditService)
 		transactions := protected.Group("/transactions")
 		{
 			transactions.POST("", transactionController.Create)
@@ -57,7 +57,7 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		}
 
 		// Fund routes
-		fundController := controllers.NewFundController()
+		fundController := handlers.NewFundController(serviceProvider.FundService, serviceProvider.AuditService)
 		funds := protected.Group("/funds")
 		{
 			funds.POST("", fundController.Create)
@@ -70,7 +70,7 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		}
 
 		// Budget Line Item routes
-		budgetController := controllers.NewBudgetLineItemController()
+		budgetController := handlers.NewBudgetLineItemController(serviceProvider.BudgetLineItemService, serviceProvider.AuditService)
 		budgets := protected.Group("/budgets")
 		{
 			budgets.POST("", budgetController.Create)
@@ -81,7 +81,7 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		}
 
 		// Entity routes
-		entityController := controllers.NewEntityController()
+		entityController := handlers.NewEntityController(serviceProvider.EntityService, serviceProvider.AuditService)
 		entities := protected.Group("/entities")
 		{
 			entities.POST("", entityController.Create)
@@ -95,7 +95,7 @@ func RegisterRoutes(router *gin.RouterGroup) {
 
 		// File upload routes - Commented out until FileController is implemented
 
-		fileController := controllers.NewFileController()
+		fileController := handlers.NewFileController(serviceProvider.FileService, serviceProvider.AuditService)
 		files := protected.Group("/files")
 		{
 			files.POST("", fileController.Upload)
@@ -107,11 +107,14 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		analyticsRoutes := protected.Group("/analytics")
 		analyticsRoutes.Use(middleware.RequireRole(models.RoleAdmin, models.RoleAuditor))
 		{
-			analyticsController := controllers.NewAnalyticsController()
+			analyticsController := handlers.NewAnalyticsController(serviceProvider.AnalyticsService, serviceProvider.AuditService)
 			// Based on AnalyticsController implementation
 			analyticsRoutes.GET("/transactions", analyticsController.GetTransactionSummary)
 			analyticsRoutes.GET("/users", analyticsController.GetUserActivitySummary)
 			analyticsRoutes.GET("/funds", analyticsController.GetFundUtilizationReport)
+			analyticsRoutes.GET("/system", analyticsController.GetSystemStats)
+			analyticsRoutes.GET("/recent-activity", analyticsController.GetRecentActivity)
+			analyticsRoutes.GET("/user-registration-trends", analyticsController.GetUserRegistrationTrends)
 			// These endpoints will be implemented in the future
 			// analyticsRoutes.GET("/dashboard", analyticsController.GetDashboard)
 			// analyticsRoutes.GET("/suspicious-transactions", analyticsController.GetSuspiciousTransactions)
@@ -123,7 +126,7 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		adminRoutes := protected.Group("/admin")
 		adminRoutes.Use(middleware.RequireRole(models.RoleAdmin))
 		{
-			adminController := controllers.NewAdminController()
+			adminController := handlers.NewAdminController(serviceProvider.AdminService, serviceProvider.UserService, serviceProvider.AuditService)
 			// Based on AdminController implementation
 			adminRoutes.GET("/users", adminController.GetUsers)
 			adminRoutes.GET("/users/:id", adminController.GetUserByID)
@@ -138,11 +141,11 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		}
 
 		// User management routes (admin only)
-		userManagementController := controllers.NewUserManagementController()
+		userManagementController := handlers.NewUserManagementController(serviceProvider.UserService, serviceProvider.AuditService)
 		userRoutes := protected.Group("/users")
 		{
-			userRoutes.POST("", userManagementController.CreateUser)
-			userRoutes.GET("", userManagementController.GetUsers)
+			userRoutes.POST("", userManagementController.Create)
+			userRoutes.GET("", userManagementController.GetAll)
 		}
 	}
 }

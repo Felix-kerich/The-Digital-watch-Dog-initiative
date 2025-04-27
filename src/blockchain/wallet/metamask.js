@@ -86,6 +86,62 @@ export const addSepoliaNetwork = async () => {
   }
 };
 
+// MetaMask network configuration
+export const GANACHE_NETWORK = {
+    chainId: '0x539', // 1337 in hex
+    chainName: 'Ganache',
+    nativeCurrency: {
+        name: 'ETH',
+        symbol: 'ETH',
+        decimals: 18
+    },
+    rpcUrls: ['http://127.0.0.1:8545'],
+    blockExplorerUrls: []
+};
+
+// Function to setup Ganache network in MetaMask
+export async function setupGanacheNetwork() {
+    try {
+        if (!window.ethereum) {
+            throw new Error('MetaMask is not installed');
+        }
+
+        // First try to switch to the network if it exists
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: GANACHE_NETWORK.chainId }]
+            });
+        } catch (switchError) {
+            // Network doesn't exist, add it
+            if (switchError.code === 4902) {
+                await window.ethereum.request({
+                    method: 'wallet_addEthereumChain',
+                    params: [GANACHE_NETWORK]
+                });
+            } else {
+                throw switchError;
+            }
+        }
+
+        return true;
+    } catch (error) {
+        console.error('Error setting up Ganache network:', error);
+        throw error;
+    }
+}
+
+// Function to check if currently on Ganache network
+export async function isGanacheNetwork() {
+    try {
+        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        return chainId === GANACHE_NETWORK.chainId;
+    } catch (error) {
+        console.error('Error checking network:', error);
+        return false;
+    }
+}
+
 // Sign a message using MetaMask
 export const signMessage = async (message) => {
   if (!isMetaMaskInstalled()) return null;
@@ -177,4 +233,4 @@ export const getBalance = async (address) => {
     console.error("Error getting balance:", error);
     return null;
   }
-}; 
+};

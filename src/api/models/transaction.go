@@ -73,6 +73,8 @@ type Transaction struct {
 	CreatedAt         time.Time         `json:"createdAt" gorm:"index"`
 	UpdatedAt         time.Time         `json:"updatedAt"`
 	DeletedAt         gorm.DeletedAt    `json:"deletedAt" gorm:"index"`
+	DocumentRef       string            `json:"documentRef"`
+	Metadata          JSON              `json:"metadata" gorm:"type:json"`
 }
 
 // BeforeCreate will set a UUID rather than numeric ID
@@ -81,19 +83,19 @@ func (t *Transaction) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
-// FundCategory defines the type of fund
-type FundCategory string
+// // FundCategory defines the type of fund
+// type FundCategory string
 
-const (
-	// FundDevelopment is for development projects
-	FundDevelopment FundCategory = "DEVELOPMENT"
-	// FundRecurrent is for recurrent expenditure
-	FundRecurrent FundCategory = "RECURRENT"
-	// FundEmergency is for emergency funds
-	FundEmergency FundCategory = "EMERGENCY"
-	// FundSpecial is for special purpose funds
-	FundSpecial FundCategory = "SPECIAL"
-)
+// const (
+// 	// FundDevelopment is for development projects
+// 	FundDevelopment FundCategory = "DEVELOPMENT"
+// 	// FundRecurrent is for recurrent expenditure
+// 	FundRecurrent FundCategory = "RECURRENT"
+// 	// FundEmergency is for emergency funds
+// 	FundEmergency FundCategory = "EMERGENCY"
+// 	// FundSpecial is for special purpose funds
+// 	FundSpecial FundCategory = "SPECIAL"
+// )
 
 // BudgetLineItem represents a specific budget allocation within a fund
 type BudgetLineItem struct {

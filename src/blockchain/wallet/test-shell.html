@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digital Watchdog Initiative - Blockchain Test Shell</title>
+    <title>Digital Watchdog Initiative - Blockchain Monitor</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
@@ -100,90 +100,169 @@
             border-left: 4px solid #ef4444;
             margin-bottom: 20px;
         }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        
+        .stats-card {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stats-card h3 {
+            color: #2563eb;
+            margin-bottom: 10px;
+        }
+        
+        .transaction-list {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .transaction-item {
+            padding: 15px;
+            border-bottom: 1px solid #e5e7eb;
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr 1fr;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .transaction-item:last-child {
+            border-bottom: none;
+        }
+        
+        .transaction-id {
+            font-family: monospace;
+            color: #6b7280;
+        }
+        
+        .transaction-amount {
+            font-weight: 500;
+            color: #059669;
+        }
+        
+        .transaction-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-align: center;
+            font-size: 0.875rem;
+        }
+        
+        .status-pending {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        
+        .status-completed {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        .status-flagged {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        
+        #monitoring-status {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #f8fafc;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            background-color: #f1f5f9;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        
+        .tab.active {
+            background-color: #2563eb;
+            color: white;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Digital Watchdog Initiative - Blockchain Test Shell</h1>
+        <h1>Digital Watchdog Initiative - Blockchain Monitor</h1>
         
-        <div class="alert">
-            <strong>Important:</strong> Before using the wallet interface, you need to deploy the smart contracts to your local Ganache blockchain.
+        <div id="monitoring-status">
+            <h3>🔄 System Status</h3>
+            <p>Monitoring blockchain transactions and events in real-time.</p>
         </div>
         
-        <h2>Setup Instructions</h2>
-        
-        <div class="steps">
-            <div class="step">
-                <span class="step-number">1</span>
-                <strong>Make sure Ganache is running</strong>
-                <p>Ensure that your Ganache blockchain is running on the default port (7545).</p>
+        <div class="dashboard">
+            <div class="stats-card">
+                <h3>Transactions Overview</h3>
+                <div id="transaction-stats">Loading...</div>
             </div>
-            
-            <div class="step">
-                <span class="step-number">2</span>
-                <strong>Deploy the contracts</strong>
-                <p>Run the following command in your terminal (from the blockchain directory):</p>
-                <pre>npx hardhat run scripts/deploy.js --network ganache</pre>
+            <div class="stats-card">
+                <h3>Network Status</h3>
+                <div id="network-stats">Loading...</div>
             </div>
-            
-            <div class="step">
-                <span class="step-number">3</span>
-                <strong>Check contract addresses</strong>
-                <p>The deployment script will create a <code>deployed-contracts.json</code> file in this directory with the addresses of your deployed contracts.</p>
-            </div>
-            
-            <div class="step">
-                <span class="step-number">4</span>
-                <strong>Connect MetaMask to Ganache</strong>
-                <p>Configure MetaMask to connect to your local Ganache blockchain:</p>
-                <ul>
-                    <li>Network Name: <strong>Ganache</strong></li>
-                    <li>RPC URL: <strong>http://localhost:7545</strong></li>
-                    <li>Chain ID: <strong>1337</strong></li>
-                    <li>Currency Symbol: <strong>ETH</strong></li>
-                </ul>
-                <p>You can also import one of the Ganache accounts using its private key.</p>
+            <div class="stats-card">
+                <h3>Smart Contracts</h3>
+                <div id="contract-stats">Loading...</div>
             </div>
         </div>
         
-        <h2>Need Help?</h2>
-        <p>
-            If you encounter any issues, make sure that:
-        </p>
-        <ul>
-            <li>Your Hardhat configuration is correctly set up for Ganache</li>
-            <li>You have compiled the contracts (<code>npx hardhat compile</code>)</li>
-            <li>MetaMask is unlocked and connected to the Ganache network</li>
-            <li>You have sufficient test ETH in your wallet</li>
-        </ul>
+        <div class="tabs">
+            <div class="tab active" data-tab="transactions">Transactions</div>
+            <div class="tab" data-tab="events">Events</div>
+            <div class="tab" data-tab="analytics">Analytics</div>
+        </div>
         
-        <div class="buttons">
-            <a href="index.html" class="button">Go to Wallet Interface</a>
-            <a href="https://github.com/trufflesuite/ganache#readme" target="_blank" class="button secondary-button">Ganache Documentation</a>
+        <div class="transaction-list">
+            <h2>Recent Transactions</h2>
+            <div id="transaction-list">Loading transactions...</div>
+        </div>
+        
+        <div id="action-panel" class="transaction-form">
+            <h3>Transaction Management</h3>
+            <div id="wallet-status"></div>
+            <div id="transaction-form"></div>
         </div>
     </div>
-    
+
+    <script src="https://cdn.ethers.io/lib/ethers-5.5.umd.min.js"></script>
+    <script src="app.js"></script>
     <script>
-        // Check if deployed-contracts.json exists
+        // Check for deployed contracts and redirect if found
         fetch('./deployed-contracts.json')
             .then(response => {
-                if (!response.ok) {
-                    throw new Error('Contracts not deployed');
-                }
+                if (!response.ok) throw new Error('Contracts not deployed');
                 return response.json();
             })
             .then(data => {
-                // If contracts are deployed, redirect to main interface
                 if (data && Object.keys(data).length > 0) {
-                    setTimeout(() => {
-                        window.location.href = 'index.html';
-                    }, 2000);
+                    initializeMonitoring(data);
                 }
             })
             .catch(error => {
-                console.log('Contracts not yet deployed:', error);
-                // Stay on this page if contracts are not deployed
+                console.log('Setup required:', error);
+                document.getElementById('monitoring-status').innerHTML = `
+                    <h3>⚠️ Setup Required</h3>
+                    <p>Please deploy smart contracts to begin monitoring.</p>
+                `;
             });
     </script>
 </body>
-</html> 
+</html>

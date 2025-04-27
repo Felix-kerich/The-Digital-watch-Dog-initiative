@@ -1,4 +1,4 @@
-package controllers
+package handlers
 
 import (
 	"net/http"
@@ -7,28 +7,32 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/the-digital-watchdog-initiative/models"
-	"github.com/the-digital-watchdog-initiative/repository"
+	"github.com/the-digital-watchdog-initiative/services"
 	"github.com/the-digital-watchdog-initiative/utils"
 )
 
 // AdminController handles administrative operations
 type AdminController struct {
-	adminRepo repository.AdminRepository
-	userRepo  repository.UserRepository
-	auditRepo repository.AuditLogRepository
+	adminService services.AdminService
+	userService  services.UserService
+	auditService services.AuditService
+	logger       *utils.NamedLogger
 }
 
 // NewAdminController creates a new admin controller
-func NewAdminController() *AdminController {
+func NewAdminController(adminService services.AdminService, userService services.UserService, auditService services.AuditService) *AdminController {
 	return &AdminController{
-		adminRepo: repository.NewAdminRepository(),
-		userRepo:  repository.NewUserRepository(),
-		auditRepo: repository.NewAuditLogRepository(),
+		adminService: adminService,
+		userService:  userService,
+		auditService: auditService,
+		logger:       utils.NewLogger("admin-controller"),
 	}
 }
 
 // GetUsers retrieves all users with filtering and pagination
 func (ac *AdminController) GetUsers(c *gin.Context) {
+	ac.logger.Info("Getting users with pagination", nil)
+
 	// Parse pagination parameters
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
@@ -47,11 +51,32 @@ func (ac *AdminController) GetUsers(c *gin.Context) {
 		"search":   c.Query("search"),
 	}
 
-	// Get users with pagination
-	users, total, err := ac.adminRepo.GetUsers(page, limit, filter)
+	// Get users with pagination using the admin service
+	users, total, err := ac.adminService.GetUsers(page, limit, filter)
 	if err != nil {
+		ac.logger.Error("Failed to retrieve users", map[string]interface{}{"error": err.Error()})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve users"})
 		return
+	}
+
+	// Log the activity
+	userID, exists := c.Get("userID")
+	if exists {
+		metadata := map[string]interface{}{
+			"page":   page,
+			"limit":  limit,
+			"filter": filter,
+		}
+
+		if err := ac.auditService.LogActivity(
+			userID.(string),
+			"ADMIN_USERS_VIEWED",
+			"User",
+			"",
+			metadata,
+		); err != nil {
+			ac.logger.Warn("Failed to log admin activity", map[string]interface{}{"error": err.Error()})
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -59,18 +84,44 @@ func (ac *AdminController) GetUsers(c *gin.Context) {
 		"total":      total,
 		"page":       page,
 		"limit":      limit,
-		"totalPages": (int(total) + limit - 1) / limit,
+		"totalPages": (total + int64(limit) - 1) / int64(limit),
 	})
 }
 
 // GetUserByID retrieves a user by ID
 func (ac *AdminController) GetUserByID(c *gin.Context) {
-	id := c.Param("id")
+	ac.logger.Info("Getting user by ID", nil)
 
-	user, err := ac.adminRepo.GetUserByID(id)
+	userID := c.Param("id")
+	if userID == "" {
+		ac.logger.Warn("User ID is required", nil)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
+		return
+	}
+
+	user, err := ac.adminService.GetUserByID(userID)
 	if err != nil {
+		ac.logger.Error("User not found", map[string]interface{}{"userID": userID, "error": err.Error()})
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
+	}
+
+	// Log the activity
+	requesterID, exists := c.Get("userID")
+	if exists {
+		metadata := map[string]interface{}{
+			"targetUserID": userID,
+		}
+
+		if err := ac.auditService.LogActivity(
+			requesterID.(string),
+			"ADMIN_USER_VIEWED",
+			"User",
+			userID,
+			metadata,
+		); err != nil {
+			ac.logger.Warn("Failed to log admin activity", map[string]interface{}{"error": err.Error()})
+		}
 	}
 
 	c.JSON(http.StatusOK, user)
@@ -110,7 +161,7 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 		UpdatedAt:    time.Now(),
 	}
 
-	if err := ac.adminRepo.CreateUser(user); err != nil {
+	if err := ac.adminService.CreateUser(user); err != nil {
 		if _, ok := err.(*utils.ConflictError); ok {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		} else {
@@ -122,19 +173,21 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 	// Get current admin's user ID from context
 	adminID, _ := c.Get("userID")
 
-	// Create audit log
-	auditLog := &models.AuditLog{
-		Action:     "USER_CREATED",
-		UserID:     adminID.(string),
-		EntityType: "User",
-		EntityID:   user.ID,
-		Detail:     "Created user: " + user.Email + " with role: " + string(user.Role),
-		IP:         c.ClientIP(),
-		Timestamp:  time.Now(),
+	// Log the activity
+	metadata := map[string]interface{}{
+		"userName": user.Name,
+		"userEmail": user.Email,
+		"userRole": user.Role,
 	}
 
-	if err := ac.auditRepo.Create(auditLog); err != nil {
-		utils.Logger.Warn("Failed to create audit log for user creation")
+	if err := ac.auditService.LogActivity(
+		adminID.(string),
+		"USER_CREATED",
+		"User",
+		user.ID,
+		metadata,
+	); err != nil {
+		ac.logger.Warn("Failed to log user creation activity", map[string]interface{}{"error": err.Error()})
 	}
 
 	// Don't return password hash
@@ -146,7 +199,7 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 func (ac *AdminController) UpdateUser(c *gin.Context) {
 	id := c.Param("id")
 
-	user, err := ac.adminRepo.GetUserByID(id)
+	user, err := ac.adminService.GetUserByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
@@ -184,7 +237,7 @@ func (ac *AdminController) UpdateUser(c *gin.Context) {
 
 	user.UpdatedAt = time.Now()
 
-	if err := ac.adminRepo.UpdateUser(user); err != nil {
+	if err := ac.adminService.UpdateUser(user); err != nil {
 		if _, ok := err.(*utils.ConflictError); ok {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		} else {
@@ -193,26 +246,27 @@ func (ac *AdminController) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	// Get current admin's user ID from context
-	adminID, _ := c.Get("userID")
+	// Get current user ID from context
+	currentUserID, _ := c.Get("userID")
 
-	// Create audit log
-	auditLog := &models.AuditLog{
-		Action:     "USER_UPDATED",
-		UserID:     adminID.(string),
-		EntityType: "User",
-		EntityID:   user.ID,
-		Detail:     "Updated user: " + user.Email,
-		IP:         c.ClientIP(),
-		Timestamp:  time.Now(),
+	// Log the activity
+	metadata := map[string]interface{}{
+		"userName": user.Name,
+		"userEmail": user.Email,
+		"userRole": user.Role,
 	}
 
-	if err := ac.auditRepo.Create(auditLog); err != nil {
-		utils.Logger.Warn("Failed to create audit log for user update")
+	if err := ac.auditService.LogActivity(
+		currentUserID.(string),
+		"USER_UPDATED",
+		"User",
+		user.ID,
+		metadata,
+	); err != nil {
+		ac.logger.Warn("Failed to log user update activity", map[string]interface{}{"error": err.Error()})
 	}
 
-	// Don't return password hash
-	user.PasswordHash = ""
+	// Don't return password hash in the response
 	c.JSON(http.StatusOK, user)
 }
 
@@ -220,7 +274,7 @@ func (ac *AdminController) UpdateUser(c *gin.Context) {
 func (ac *AdminController) ResetUserPassword(c *gin.Context) {
 	id := c.Param("id")
 
-	user, err := ac.adminRepo.GetUserByID(id)
+	user, err := ac.adminService.GetUserByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
@@ -242,27 +296,27 @@ func (ac *AdminController) ResetUserPassword(c *gin.Context) {
 		return
 	}
 
-	if err := ac.adminRepo.ResetUserPassword(id, hashedPassword); err != nil {
+	if err := ac.adminService.ResetUserPassword(id, hashedPassword); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset password"})
 		return
 	}
 
 	// Get current admin's user ID from context
-	adminID, _ := c.Get("userID")
+	currentUserID, _ := c.Get("userID")
 
-	// Create audit log
-	auditLog := &models.AuditLog{
-		Action:     "PASSWORD_RESET",
-		UserID:     adminID.(string),
-		EntityType: "User",
-		EntityID:   user.ID,
-		Detail:     "Reset password for user: " + user.Email,
-		IP:         c.ClientIP(),
-		Timestamp:  time.Now(),
+	// Log the activity
+	metadata := map[string]interface{}{
+		"userEmail": user.Email,
 	}
 
-	if err := ac.auditRepo.Create(auditLog); err != nil {
-		utils.Logger.Warn("Failed to create audit log for password reset")
+	if err := ac.auditService.LogActivity(
+		currentUserID.(string),
+		"USER_PASSWORD_RESET",
+		"User",
+		id,
+		metadata,
+	); err != nil {
+		ac.logger.Warn("Failed to log password reset activity", map[string]interface{}{"error": err.Error()})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Password reset successfully"})
@@ -270,29 +324,32 @@ func (ac *AdminController) ResetUserPassword(c *gin.Context) {
 
 // GetSystemInfo returns general system information and statistics
 func (ac *AdminController) GetSystemInfo(c *gin.Context) {
-	stats, err := ac.adminRepo.GetSystemStats()
+	ac.logger.Info("Getting system information", nil)
+
+	// Get system info from service
+	info, err := ac.adminService.GetSystemInfo()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve system stats"})
+		ac.logger.Error("Failed to retrieve system information", map[string]interface{}{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve system information"})
 		return
 	}
 
-	// Get recent activity
-	recentActivity, err := ac.adminRepo.GetRecentActivity(10)
-	if err != nil {
-		utils.Logger.Warn("Failed to retrieve recent activity")
+	// Add additional information if needed
+	info["serverTime"] = time.Now()
+
+	// Log the activity
+	userID, exists := c.Get("userID")
+	if exists {
+		if err := ac.auditService.LogActivity(
+			userID.(string),
+			"ADMIN_SYSTEM_INFO_VIEWED",
+			"System",
+			"",
+			nil,
+		); err != nil {
+			ac.logger.Warn("Failed to log admin activity", map[string]interface{}{"error": err.Error()})
+		}
 	}
 
-	// Get user registration trends
-	trends, err := ac.adminRepo.GetUserRegistrationTrends(12)
-	if err != nil {
-		utils.Logger.Warn("Failed to retrieve user registration trends")
-	}
-
-	response := gin.H{
-		"counts":                 stats["counts"],
-		"recentActivity":         recentActivity,
-		"userRegistrationTrends": trends,
-	}
-
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, info)
 }

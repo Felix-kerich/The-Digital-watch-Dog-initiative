@@ -30,7 +30,12 @@ FEATURES = [
     'weekend',
     'source_risk_score',
     'destination_risk_score',
-    'geo_distance'
+    'geo_distance',
+    'category_avg_amount',
+    'category_max_amount',
+    'category_frequency',
+    'utilization_rate',
+    'fiscal_progress'
 ]
 
 def load_or_train_model():
@@ -58,7 +63,12 @@ def load_or_train_model():
             'weekend': np.random.choice([0, 1], size=n_samples, p=[0.7, 0.3]),
             'source_risk_score': np.random.uniform(0, 1, size=n_samples),
             'destination_risk_score': np.random.uniform(0, 1, size=n_samples),
-            'geo_distance': np.random.exponential(scale=100, size=n_samples)
+            'geo_distance': np.random.exponential(scale=100, size=n_samples),
+            'category_avg_amount': np.random.exponential(scale=5000, size=n_samples),
+            'category_max_amount': np.random.exponential(scale=10000, size=n_samples),
+            'category_frequency': np.random.exponential(scale=5, size=n_samples),
+            'utilization_rate': np.random.uniform(0, 1, size=n_samples),
+            'fiscal_progress': np.random.uniform(0, 1, size=n_samples)
         }
         
         # Create DataFrame
@@ -98,6 +108,15 @@ def extract_features(transaction, historical_data=None):
     transaction_hour = txn_time.hour
     weekend = 1 if txn_time.weekday() >= 5 else 0
     
+    # Get fund details
+    fund_category = transaction.get('fund_category', 'UNKNOWN')
+    fiscal_year = transaction.get('fiscal_year', '')
+    budget_allocated = float(transaction.get('budget_allocated', 0))
+    budget_utilized = float(transaction.get('budget_utilized', 0))
+    
+    # Calculate budget utilization rate
+    utilization_rate = (budget_utilized / budget_allocated) if budget_allocated > 0 else 0
+    
     # Calculate historical features
     if historical_data:
         df_hist = pd.DataFrame(historical_data)
@@ -118,19 +137,37 @@ def extract_features(transaction, historical_data=None):
             time_since_last = (txn_time - last_txn_time).total_seconds() / 3600
         else:
             time_since_last = 0
+            
+        # Calculate category spending patterns
+        if 'fund_category' in df_hist:
+            category_txns = df_hist[df_hist['fund_category'] == fund_category]
+            category_avg = category_txns['amount'].mean() if len(category_txns) > 0 else transaction['amount']
+            category_max = category_txns['amount'].max() if len(category_txns) > 0 else transaction['amount']
+            category_frequency = len(category_txns) / (time_range_days/7) if time_range_days > 0 else 0
+        else:
+            category_avg = transaction['amount']
+            category_max = transaction['amount']
+            category_frequency = 0
     else:
         previous_transaction_count = 0
         average_amount = transaction['amount']
         frequency = 0
         time_since_last = 0
+        category_avg = transaction['amount']
+        category_max = transaction['amount']
+        category_frequency = 0
     
-    # Source and destination risk scores (placeholder - would come from a real risk scoring system)
-    # In a real system, these would be based on historical behavior, KYC data, etc.
-    source_risk_score = 0.1  # Low risk by default
-    destination_risk_score = 0.1  # Low risk by default
+    # Calculate fiscal year progress (0-1)
+    try:
+        fiscal_start = datetime.strptime(f"{fiscal_year}-07-01", "%Y-%m-%d")  # Assuming July-June fiscal year
+        fiscal_end = fiscal_start.replace(year=fiscal_start.year + 1)
+        fiscal_progress = (txn_time - fiscal_start).total_seconds() / (fiscal_end - fiscal_start).total_seconds()
+    except:
+        fiscal_progress = 0.5  # Default to mid-year if fiscal year parsing fails
     
-    # Geographic distance (placeholder - would come from real geo data)
-    geo_distance = 0
+    # Source and destination risk scores
+    source_risk_score = calculate_entity_risk_score(transaction.get('source_id', ''), historical_data)
+    destination_risk_score = calculate_entity_risk_score(transaction.get('destination_id', ''), historical_data)
     
     # Create feature vector
     features = {
@@ -143,10 +180,43 @@ def extract_features(transaction, historical_data=None):
         'weekend': weekend,
         'source_risk_score': source_risk_score,
         'destination_risk_score': destination_risk_score,
-        'geo_distance': geo_distance
+        'category_avg_amount': category_avg,
+        'category_max_amount': category_max,
+        'category_frequency': category_frequency,
+        'utilization_rate': utilization_rate,
+        'fiscal_progress': fiscal_progress
     }
     
     return features
+
+def calculate_entity_risk_score(entity_id, historical_data):
+    """Calculate risk score for an entity based on historical behavior."""
+    if not historical_data or not entity_id:
+        return 0.1  # Default low risk
+        
+    df_hist = pd.DataFrame(historical_data)
+    entity_txns = df_hist[
+        (df_hist['source_id'] == entity_id) | 
+        (df_hist['destination_id'] == entity_id)
+    ]
+    
+    if len(entity_txns) == 0:
+        return 0.2  # Slightly higher risk for new entities
+    
+    # Calculate risk factors
+    avg_amount = entity_txns['amount'].mean()
+    max_amount = entity_txns['amount'].max()
+    txn_frequency = len(entity_txns) / ((entity_txns['timestamp'].max() - entity_txns['timestamp'].min()).total_seconds() / (24*3600*7))
+    amount_volatility = entity_txns['amount'].std() / avg_amount if avg_amount > 0 else 0
+    
+    # Combine risk factors (simplified scoring)
+    risk_score = (
+        0.3 * min(1.0, max_amount / 1000000) +  # High amounts increase risk
+        0.2 * min(1.0, txn_frequency / 10) +    # High frequency increases risk
+        0.5 * min(1.0, amount_volatility)       # High volatility increases risk
+    )
+    
+    return min(1.0, max(0.1, risk_score))
 
 def detect_anomaly(transaction, historical_data=None):
     """Detect if a transaction is anomalous."""
@@ -181,22 +251,44 @@ def detect_anomaly(transaction, historical_data=None):
 
 def generate_anomaly_reason(features, score):
     """Generate a human-readable reason for why transaction was flagged."""
-    # Find the most anomalous features
-    feature_list = list(features.columns)
-    feature_values = features.iloc[0].values
+    reasons = []
     
-    # Create a basic reason based on transaction amount
-    if feature_values[feature_list.index('amount')] > 10000:
-        return "Unusually large transaction amount"
+    # Amount-based flags
+    if features['amount'].iloc[0] > features['category_max_amount'].iloc[0] * 1.5:
+        reasons.append("Transaction amount significantly higher than category maximum")
     
-    if feature_values[feature_list.index('time_since_last')] < 1 and feature_values[feature_list.index('previous_transaction_count')] > 0:
-        return "Unusually frequent activity compared to historical pattern"
+    if features['amount'].iloc[0] > features['average_amount'].iloc[0] * 3:
+        reasons.append("Transaction amount unusually high compared to historical average")
     
-    if feature_values[feature_list.index('transaction_hour')] >= 22 or feature_values[feature_list.index('transaction_hour')] <= 5:
-        return "Unusual transaction time (overnight hours)"
-        
-    # Generic reason
-    return "Transaction patterns differ from normal behavior"
+    # Timing-based flags
+    if features['transaction_hour'].iloc[0] >= 22 or features['transaction_hour'].iloc[0] <= 5:
+        reasons.append("Unusual transaction time (overnight hours)")
+    
+    if features['weekend'].iloc[0] == 1:
+        reasons.append("Weekend transaction unusual for government funds")
+    
+    # Budget utilization flags
+    if features['utilization_rate'].iloc[0] > 0.9 and features['fiscal_progress'].iloc[0] < 0.5:
+        reasons.append("High budget utilization rate early in fiscal year")
+    
+    if features['utilization_rate'].iloc[0] > 1.0:
+        reasons.append("Transaction would exceed allocated budget")
+    
+    # Frequency-based flags
+    if features['time_since_last'].iloc[0] < 24 and features['previous_transaction_count'].iloc[0] > 0:
+        reasons.append("Unusually frequent transactions")
+    
+    # Risk score flags
+    if features['source_risk_score'].iloc[0] > 0.7:
+        reasons.append("Source entity has high risk score")
+    
+    if features['destination_risk_score'].iloc[0] > 0.7:
+        reasons.append("Destination entity has high risk score")
+    
+    if not reasons:
+        reasons.append("General anomalous pattern detected")
+    
+    return " | ".join(reasons)
 
 @app.route('/detect', methods=['POST'])
 def api_detect_anomaly():
@@ -285,4 +377,4 @@ def health_check():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port) 
+    app.run(host='0.0.0.0', port=port)

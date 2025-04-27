@@ -3,28 +3,23 @@
  * Provides functions to interact with deployed smart contracts using ethers.js
  */
 
-import { ethers } from './ethers-5.7.esm.min.js';
+// Use the global ethers object instead of importing it
+const ethers = window.ethers;
+
+// Check for ethers availability
+if (typeof ethers === 'undefined') {
+  console.error('Ethers library is not available in contract-interaction.js');
+  throw new Error('Ethers library is not defined');
+}
 
 // Paths to artifacts
-const TRANSACTION_LOGGER_ARTIFACT_PATH = '../artifacts/contracts/TransactionEventLogger.sol/TransactionEventLogger.json';
-const FUND_MANAGER_ARTIFACT_PATH = '../artifacts/contracts/FundManager.sol/FundManager.json';
+const TRANSACTION_LOGGER_ARTIFACT_PATH = './TransactionEventLogger.json';
+const FUND_MANAGER_ARTIFACT_PATH = './FundManager.json';
 const DEPLOYED_CONTRACTS_PATH = '../deployed-contracts.json';
 
-// Try to load contract ABIs
-let TransactionEventLoggerArtifact = null;
-let FundManagerArtifact = null;
-
-try {
-  TransactionEventLoggerArtifact = await import(TRANSACTION_LOGGER_ARTIFACT_PATH, { assert: { type: 'json' } });
-} catch (error) {
-  console.warn('Failed to load TransactionEventLogger artifact. Make sure contracts are compiled:', error);
-}
-
-try {
-  FundManagerArtifact = await import(FUND_MANAGER_ARTIFACT_PATH, { assert: { type: 'json' } });
-} catch (error) {
-  console.warn('Failed to load FundManager artifact. Make sure contracts are compiled:', error);
-}
+// Contract ABI variables - will be populated during initialization
+let TransactionEventLoggerABI = null;
+let FundManagerABI = null;
 
 // Default provider (for reading from blockchain without signing)
 export const getProvider = (rpcUrl) => {
@@ -58,6 +53,53 @@ export async function loadDeployedAddresses() {
 }
 
 /**
+ * Load contract ABIs from JSON files
+ */
+export async function loadContractABIs() {
+  try {
+    // Load TransactionEventLogger ABI
+    let response = await fetch(TRANSACTION_LOGGER_ARTIFACT_PATH);
+    if (response.ok) {
+      const data = await response.json();
+      TransactionEventLoggerABI = data.abi;
+    } else {
+      // Try alternative path
+      response = await fetch('../artifacts/contracts/TransactionEventLogger.sol/TransactionEventLogger.json');
+      if (response.ok) {
+        const data = await response.json();
+        TransactionEventLoggerABI = data.abi;
+      } else {
+        console.warn('Failed to load TransactionEventLogger ABI');
+      }
+    }
+
+    // Load FundManager ABI
+    response = await fetch(FUND_MANAGER_ARTIFACT_PATH);
+    if (response.ok) {
+      const data = await response.json();
+      FundManagerABI = data.abi;
+    } else {
+      // Try alternative path
+      response = await fetch('../artifacts/contracts/FundManager.sol/FundManager.json');
+      if (response.ok) {
+        const data = await response.json();
+        FundManagerABI = data.abi;
+      } else {
+        console.warn('Failed to load FundManager ABI');
+      }
+    }
+    
+    return {
+      TransactionEventLogger: TransactionEventLoggerABI,
+      FundManager: FundManagerABI
+    };
+  } catch (error) {
+    console.error('Error loading contract ABIs:', error);
+    return null;
+  }
+}
+
+/**
  * Get a TransactionEventLogger contract instance
  * @param {Object} params - Parameters
  * @param {ethers.providers.JsonRpcSigner} params.signer - Ethers signer
@@ -65,8 +107,8 @@ export async function loadDeployedAddresses() {
  * @returns {Promise<ethers.Contract>} Contract instance
  */
 export async function getTransactionEventLoggerContract({ signer, address }) {
-  // ABI for the TransactionEventLogger contract
-  const abi = [
+  // Use ABI if available, otherwise use minimal ABI
+  const abi = TransactionEventLoggerABI || [
     "function logTransactionEvent(uint256 transactionId, uint8 eventType, string memory actorHash, string memory detailsHash, string memory reason) external",
     "function getTransactionEvents(uint256 transactionId) external view returns (tuple(uint8 eventType, uint256 timestamp, string actorHash, string detailsHash, string reason)[])",
     "function hasRole(bytes32 role, address account) external view returns (bool)",
@@ -80,8 +122,8 @@ export async function getTransactionEventLoggerContract({ signer, address }) {
   let contractAddress = address;
   if (!contractAddress) {
     const deployedAddresses = await loadDeployedAddresses();
-    if (deployedAddresses && deployedAddresses.transactionEventLogger) {
-      contractAddress = deployedAddresses.transactionEventLogger;
+    if (deployedAddresses && deployedAddresses.TransactionEventLogger) {
+      contractAddress = deployedAddresses.TransactionEventLogger;
     } else {
       throw new Error('TransactionEventLogger address not found');
     }
@@ -116,8 +158,8 @@ export async function getFundManagerContract({ signer, address }) {
   let contractAddress = address;
   if (!contractAddress) {
     const deployedAddresses = await loadDeployedAddresses();
-    if (deployedAddresses && deployedAddresses.fundManager) {
-      contractAddress = deployedAddresses.fundManager;
+    if (deployedAddresses && deployedAddresses.FundManager) {
+      contractAddress = deployedAddresses.FundManager;
     } else {
       throw new Error('FundManager address not found');
     }

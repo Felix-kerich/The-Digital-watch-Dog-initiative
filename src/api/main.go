@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/the-digital-watchdog-initiative/routes"
+	"github.com/the-digital-watchdog-initiative/services"
 	"github.com/the-digital-watchdog-initiative/utils"
 )
 
@@ -71,11 +72,17 @@ func main() {
 	config.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 	router.Use(cors.New(config))
 
+	// Initialize service provider
+	serviceProvider := services.NewServiceProvider()
+	if err := serviceProvider.Initialize(); err != nil {
+		utils.Logger.Fatalf("Failed to initialize service provider: %v", err)
+	}
+
 	// API routes
 	api := router.Group("/api")
 	{
 		// Register all routes from routes package
-		routes.RegisterRoutes(api)
+		routes.RegisterRoutes(api, serviceProvider)
 	}
 
 	// Create an HTTP server with the configured router
