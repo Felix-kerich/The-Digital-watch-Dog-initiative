@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -38,7 +39,7 @@ type BlockchainService struct {
 	fundManagerABI     abi.ABI
 }
 
-// NewBlockchainService creates a new blockchain service
+// NewBlockchainService creates a new blockchain service with retry logic
 func NewBlockchainService() (*BlockchainService, error) {
 	config := GetConfig()
 
@@ -65,9 +66,7 @@ func NewBlockchainService() (*BlockchainService, error) {
 	}
 
 	// Remove '0x' prefix if present
-	if strings.HasPrefix(privateKeyStr, "0x") {
-		privateKeyStr = privateKeyStr[2:]
-	}
+	privateKeyStr = strings.TrimPrefix(privateKeyStr, "0x")
 
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(privateKeyStr)
@@ -75,13 +74,27 @@ func NewBlockchainService() (*BlockchainService, error) {
 		return nil, fmt.Errorf("failed to parse private key: %v", err)
 	}
 
-	// Connect to blockchain
-	client, err := ethclient.Dial(blockchainURL)
+	// Connect to blockchain with retries
+	var client *ethclient.Client
+	maxRetries := 3
+	retryDelay := time.Second * 2
+
+	for i := 0; i < maxRetries; i++ {
+		client, err = ethclient.Dial(blockchainURL)
+		if err == nil {
+			break
+		}
+		if i < maxRetries-1 {
+			Logger.Warnf("Failed to connect to blockchain, attempt %d/%d: %v", i+1, maxRetries, err)
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+		}
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to blockchain: %v", err)
+		return nil, fmt.Errorf("failed to connect to blockchain after %d attempts: %v", maxRetries, err)
 	}
 
-	// Verify we're connected to the right network
+	// Verify network with more flexible validation
 	chainID, err := client.ChainID(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chain ID: %v", err)
@@ -89,8 +102,22 @@ func NewBlockchainService() (*BlockchainService, error) {
 
 	expectedChainID := new(big.Int)
 	expectedChainID.SetString(config.ChainID, 10)
-	if chainID.Cmp(expectedChainID) != 0 {
-		Logger.Warnf("Connected to chain ID %v, expected %v", chainID.String(), expectedChainID.String())
+
+	// Validate chain ID based on network type
+	validChainID := false
+	switch config.NetworkName {
+	case "Sepolia":
+		validChainID = chainID.Cmp(big.NewInt(11155111)) == 0
+	case "Ganache":
+		validChainID = chainID.Cmp(big.NewInt(1337)) == 0
+	default:
+		validChainID = chainID.Cmp(expectedChainID) == 0
+	}
+
+	if !validChainID {
+		Logger.Warnf("Connected to unexpected chain ID %v, expected %v for network %s",
+			chainID.String(), expectedChainID.String(), config.NetworkName)
+		// Continue anyway but log the warning
 	}
 
 	// Parse Logger ABI
@@ -261,9 +288,7 @@ func hashUserID(userID string) ([32]byte, error) {
 	}
 
 	// Remove '0x' prefix if present
-	if strings.HasPrefix(userID, "0x") {
-		userID = userID[2:]
-	}
+	userID = strings.TrimPrefix(userID, "0x")
 
 	// Hash the user ID using Keccak256
 	hash := crypto.Keccak256([]byte(userID))
@@ -742,8 +767,14 @@ func stringToBytes32(s string) [32]byte {
 	return bytes32
 }
 
-// sendTransaction sends a transaction to the blockchain
+// sendTransaction sends a transaction to the blockchain with retry logic
 func (bs *BlockchainService) sendTransaction(auth *bind.TransactOpts, input []byte, contractAddress common.Address) (*types.Transaction, error) {
+	var (
+		tx       *types.Transaction
+		err      error
+		signedTx *types.Transaction
+	)
+
 	// Create transaction data
 	txData := &types.LegacyTx{
 		To:       &contractAddress,
@@ -754,17 +785,62 @@ func (bs *BlockchainService) sendTransaction(auth *bind.TransactOpts, input []by
 		Data:     input,
 	}
 
-	// Send the transaction
-	tx := types.NewTx(txData)
-	signedTx, err := auth.Signer(auth.From, tx)
+	// Create the transaction
+	tx = types.NewTx(txData)
+	signedTx, err = auth.Signer(auth.From, tx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to sign transaction: %v", err)
 	}
 
-	err = bs.client.SendTransaction(context.Background(), signedTx)
-	if err != nil {
-		return nil, err
+	// Try to send transaction with retries
+	maxRetries := 3
+	retryDelay := time.Second * 1
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		err = bs.client.SendTransaction(context.Background(), signedTx)
+		if err == nil {
+			return signedTx, nil
+		}
+
+		lastErr = err
+
+		// Check for specific error types
+		if strings.Contains(err.Error(), "nonce too low") {
+			// Update nonce and retry immediately
+			nonce, nErr := bs.client.PendingNonceAt(context.Background(), auth.From)
+			if nErr == nil {
+				txData.Nonce = nonce
+				tx = types.NewTx(txData)
+				signedTx, err = auth.Signer(auth.From, tx)
+				if err != nil {
+					return nil, fmt.Errorf("failed to sign transaction with updated nonce: %v", err)
+				}
+				continue
+			}
+		} else if strings.Contains(err.Error(), "gas price too low") {
+			// Update gas price and retry
+			newGasPrice, gErr := bs.client.SuggestGasPrice(context.Background())
+			if gErr == nil {
+				// Increase gas price by 20%
+				txData.GasPrice = new(big.Int).Mul(newGasPrice, big.NewInt(120))
+				txData.GasPrice = txData.GasPrice.Div(txData.GasPrice, big.NewInt(100))
+				tx = types.NewTx(txData)
+				signedTx, err = auth.Signer(auth.From, tx)
+				if err != nil {
+					return nil, fmt.Errorf("failed to sign transaction with updated gas price: %v", err)
+				}
+				continue
+			}
+		}
+
+		// For other errors, wait before retrying
+		if i < maxRetries-1 {
+			Logger.Warnf("Failed to send transaction, attempt %d/%d: %v", i+1, maxRetries, err)
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+		}
 	}
 
-	return signedTx, nil
+	return nil, fmt.Errorf("failed to send transaction after %d attempts. Last error: %v", maxRetries, lastErr)
 }

@@ -48,7 +48,7 @@ const transactionStatus = {
     FLAGGED: 3
 };
 
-// Initialize the application when the DOM is loaded
+ // Initialize the application when the DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('DOM loaded in app.js');
   
